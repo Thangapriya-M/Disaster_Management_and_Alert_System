@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DMAS — Disasters</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-brand"><span>🚨</span> DISASTER MANAGEMENT & ALERT SYSTEM</div>
+  <div class="topbar-right" id="topbar-user"></div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
+      <div class="page-title">🌊 Disaster Monitoring</div>
+      <button class="btn btn-primary" id="add-btn" style="display:none" onclick="openModal('disaster-modal')">
+        ➕ Add Disaster
+      </button>
+    </div>
+    <div class="page-subtitle">Live tracking of all disaster events. Sourced from admin reports.</div>
+
+    <div class="filter-bar">
+      <input id="search" placeholder="🔍 Search disasters..." oninput="renderTable()"/>
+      <select id="f-status" onchange="renderTable()">
+        <option value="">All Statuses</option>
+        <option value="ACTIVE">Active</option>
+        <option value="MONITORING">Monitoring</option>
+        <option value="RESOLVED">Resolved</option>
+      </select>
+      <select id="f-category" onchange="renderTable()">
+        <option value="">All Categories</option>
+        <option>FLOOD</option><option>CYCLONE</option><option>EARTHQUAKE</option>
+        <option>FIRE</option><option>TSUNAMI</option><option>LANDSLIDE</option><option>OTHER</option>
+      </select>
+      <select id="f-severity" onchange="renderTable()">
+        <option value="">All Severities</option>
+        <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Disaster</th><th>Category</th><th>Severity</th>
+              <th>Status</th><th>Location</th><th>Reported</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td colspan="8"><div class="loader-wrap"><div class="loader"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Add Disaster Modal -->
+<div class="modal-overlay" id="disaster-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🌊 Log New Disaster</h3>
+      <button class="modal-close" onclick="closeModal('disaster-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Title *</label>
+        <input id="d-title" class="form-control" placeholder="Brief disaster title"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Category *</label>
+          <select id="d-category" class="form-control">
+            <option>FLOOD</option><option>CYCLONE</option><option>EARTHQUAKE</option>
+            <option>FIRE</option><option>TSUNAMI</option><option>LANDSLIDE</option><option>OTHER</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Severity *</label>
+          <select id="d-severity" class="form-control">
+            <option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Location</label>
+        <input id="d-location" class="form-control" placeholder="City, District, State"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Latitude</label>
+          <input id="d-lat" class="form-control" type="number" step="any" placeholder="e.g. 13.0827"/>
+        </div>
+        <div class="form-group">
+          <label>Longitude</label>
+          <input id="d-lon" class="form-control" type="number" step="any" placeholder="e.g. 80.2707"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Affected Radius (km)</label>
+        <input id="d-radius" class="form-control" type="number" placeholder="e.g. 25"/>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="d-desc" class="form-control" rows="3" placeholder="Detailed description of the disaster..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('disaster-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createDisaster()">🌊 Log Disaster</button>
+    </div>
+  </div>
+</div>
+
+<!-- Status Update Modal -->
+<div class="modal-overlay" id="status-modal">
+  <div class="modal" style="width:360px">
+    <div class="modal-header">
+      <h3>Update Status</h3>
+      <button class="modal-close" onclick="closeModal('status-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="status-id"/>
+      <div class="form-group">
+        <label>New Status</label>
+        <select id="new-status" class="form-control">
+          <option value="ACTIVE">Active</option>
+          <option value="MONITORING">Monitoring</option>
+          <option value="RESOLVED">Resolved</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('status-modal')">Cancel</button>
+      <button class="btn btn-success" onclick="updateStatus()">✅ Update</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  renderTopbar();
+  renderSidebar('disasters');
+
+  let disasters = [];
+
+  if (getRole() === 'ADMIN') {
+    document.getElementById('add-btn').style.display = 'flex';
+  }
+
+  async function load() {
+    const res = await apiFetch('/disasters');
+    if (res && res.ok) { disasters = res.data; renderTable(); }
+  }
+
+  function renderTable() {
+    const q  = document.getElementById('search').value.toLowerCase();
+    const fs = document.getElementById('f-status').value;
+    const fc = document.getElementById('f-category').value;
+    const fv = document.getElementById('f-severity').value;
+    const filtered = disasters.filter(d =>
+      (!q  || d.title.toLowerCase().includes(q) || d.location.toLowerCase().includes(q)) &&
+      (!fs || d.status   === fs) &&
+      (!fc || d.category === fc) &&
+      (!fv || d.severity === fv)
+    );
+    const tbody = document.getElementById('table-body');
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🌊</div><p>No disasters found</p></div></td></tr>';
+      return;
+    }
+    const isAdmin = getRole() === 'ADMIN';
+    tbody.innerHTML = filtered.map(d => `
+      <tr>
+        <td style="font-weight:700;color:#aaa">#${d.id}</td>
+        <td>
+          <div style="font-weight:600">${categoryIcon(d.category)} ${d.title}</div>
+          <div style="font-size:0.8rem;color:#999;margin-top:2px">${d.description ? d.description.substring(0,60)+'...' : ''}</div>
+        </td>
+        <td><span class="badge badge-blue">${d.category}</span></td>
+        <td>${severityBadge(d.severity)}</td>
+        <td>${statusBadge(d.status)}</td>
+        <td style="font-size:0.88rem">${d.location || '—'}</td>
+        <td style="font-size:0.82rem;color:#888">${formatDate(d.createdAt)}</td>
+        <td>
+          ${isAdmin ? `
+            <button class="btn btn-sm btn-info" onclick="promptStatus(${d.id},'${d.status}')">📋 Status</button>
+            <button class="btn btn-sm btn-secondary" onclick="deleteDisaster(${d.id})" style="margin-left:4px">🗑</button>
+          ` : '<span style="color:#bbb;font-size:0.82rem">View only</span>'}
+        </td>
+      </tr>`).join('');
+  }
+
+  function promptStatus(id, current) {
+    document.getElementById('status-id').value = id;
+    document.getElementById('new-status').value = current;
+    openModal('status-modal');
+  }
+
+  async function updateStatus() {
+    const id     = document.getElementById('status-id').value;
+    const status = document.getElementById('new-status').value;
+    const res = await apiFetch(`/disasters/${id}/status`, { method:'PUT', body: JSON.stringify({status}) });
+    if (res && res.ok) { showToast('Status updated'); closeModal('status-modal'); load(); }
+    else showToast('Failed to update', 'error');
+  }
+
+  async function createDisaster() {
+    const body = {
+      title:       document.getElementById('d-title').value,
+      description: document.getElementById('d-desc').value,
+      category:    document.getElementById('d-category').value,
+      severity:    document.getElementById('d-severity').value,
+      location:    document.getElementById('d-location').value,
+      latitude:    document.getElementById('d-lat').value   || null,
+      longitude:   document.getElementById('d-lon').value   || null,
+      radiusKm:    document.getElementById('d-radius').value || null,
+    };
+    if (!body.title) { showToast('Title is required', 'error'); return; }
+    const res = await apiFetch('/disasters', { method:'POST', body: JSON.stringify(body) });
+    if (res && res.ok) { showToast('Disaster logged!'); closeModal('disaster-modal'); load(); }
+    else showToast(res?.data?.error || 'Failed', 'error');
+  }
+
+  async function deleteDisaster(id) {
+    if (!confirm('Delete this disaster record?')) return;
+    const res = await apiFetch(`/disasters/${id}`, { method:'DELETE' });
+    if (res && res.ok) { showToast('Deleted'); load(); }
+    else showToast('Delete failed', 'error');
+  }
+
+  load();
+</script>
+</body>
+</html>

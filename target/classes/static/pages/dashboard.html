@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DMAS — Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-brand"><span>🚨</span> DISASTER MANAGEMENT & ALERT SYSTEM</div>
+  <div class="topbar-right" id="topbar-user"></div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-title">🏠 Dashboard</div>
+    <div class="page-subtitle">Real-time overview of active disasters, alerts and rescue operations</div>
+
+    <!-- Stats -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card"><div class="stat-icon">🌊</div><div><div class="stat-value" id="s-disasters">—</div><div class="stat-label">Active Disasters</div></div></div>
+      <div class="stat-card orange"><div class="stat-icon">🔔</div><div><div class="stat-value" id="s-alerts">—</div><div class="stat-label">Live Alerts</div></div></div>
+      <div class="stat-card yellow"><div class="stat-icon">🚑</div><div><div class="stat-value" id="s-pending">—</div><div class="stat-label">Pending Rescues</div></div></div>
+      <div class="stat-card green"><div class="stat-icon">✅</div><div><div class="stat-value" id="s-completed">—</div><div class="stat-label">Completed</div></div></div>
+      <div class="stat-card blue"><div class="stat-icon">👥</div><div><div class="stat-value" id="s-users">—</div><div class="stat-label">Total Users</div></div></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:8px;">
+
+      <!-- Active Disasters -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🌊 Active Disasters</h3>
+          <a href="/pages/disasters.html" class="btn btn-sm btn-secondary">View All →</a>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div id="disaster-list"><div class="loader-wrap"><div class="loader"></div></div></div>
+        </div>
+      </div>
+
+      <!-- Live Alerts -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🔔 Live Alerts</h3>
+          <a href="/pages/alerts.html" class="btn btn-sm btn-secondary">View All →</a>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div id="alert-list"><div class="loader-wrap"><div class="loader"></div></div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Recent Rescue Requests -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-header">
+        <h3>🚑 Recent Rescue Requests</h3>
+        <a href="/pages/rescue.html" class="btn btn-sm btn-secondary">View All →</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Citizen</th><th>Type</th><th>Location</th><th>Urgency</th><th>Status</th><th>Responder</th></tr></thead>
+          <tbody id="rescue-table-body"><tr><td colspan="7" style="text-align:center;padding:30px"><div class="loader" style="margin:auto"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast"></div>
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  renderTopbar();
+  renderSidebar('dashboard');
+
+  async function loadDashboard() {
+    // Stats (admin only, fallback for others)
+    const role = getRole();
+    if (role === 'ADMIN') {
+      const res = await apiFetch('/analytics/summary');
+      if (res && res.ok) {
+        const d = res.data;
+        document.getElementById('s-disasters').textContent = d.activeDisasters;
+        document.getElementById('s-alerts').textContent    = d.activeAlerts;
+        document.getElementById('s-pending').textContent   = d.pendingRequests;
+        document.getElementById('s-completed').textContent = d.completedRequests;
+        document.getElementById('s-users').textContent     = d.totalUsers;
+      }
+    }
+
+    // Active Disasters
+    const dr = await apiFetch('/disasters/active');
+    const dl = document.getElementById('disaster-list');
+    if (dr && dr.ok && dr.data.length > 0) {
+      dl.innerHTML = dr.data.slice(0,5).map(d => `
+        <div style="padding:12px 16px; border-bottom:1px solid #f0f0f0; display:flex; align-items:center; gap:12px;">
+          <span style="font-size:1.4rem">${categoryIcon(d.category)}</span>
+          <div style="flex:1">
+            <div style="font-weight:600; font-size:0.9rem">${d.title}</div>
+            <div style="font-size:0.8rem; color:#888">${d.location}</div>
+          </div>
+          ${severityBadge(d.severity)}
+        </div>`).join('');
+    } else {
+      dl.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No active disasters</p></div>';
+    }
+
+    // Live Alerts
+    const ar = await apiFetch('/alerts/active');
+    const al = document.getElementById('alert-list');
+    if (ar && ar.ok && ar.data.length > 0) {
+      al.innerHTML = ar.data.slice(0,5).map(a => `
+        <div style="padding:12px 16px; border-bottom:1px solid #f0f0f0;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+            <span style="font-weight:600; font-size:0.88rem">${a.title}</span>
+            ${severityBadge(a.severity)}
+          </div>
+          <div style="font-size:0.8rem; color:#888">${a.affectedZone || 'All zones'}</div>
+        </div>`).join('');
+    } else {
+      al.innerHTML = '<div class="empty-state"><div class="empty-icon">🔕</div><p>No active alerts</p></div>';
+    }
+
+    // Rescue Requests
+    const rr = await apiFetch('/rescue');
+    const rb = document.getElementById('rescue-table-body');
+    if (rr && rr.ok && rr.data.length > 0) {
+      rb.innerHTML = rr.data.slice(0,8).map(r => `
+        <tr>
+          <td style="font-weight:700; color:#888">#${r.id}</td>
+          <td>${r.citizenName}</td>
+          <td>${r.situationType.replace(/_/g,' ')}</td>
+          <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${r.locationDescription || '—'}</td>
+          <td>${urgencyBar(r.urgencyLevel)}</td>
+          <td>${statusBadge(r.status)}</td>
+          <td style="font-size:0.85rem">${r.assignedResponderName || '<span style="color:#bbb">Unassigned</span>'}</td>
+        </tr>`).join('');
+    } else {
+      rb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>No rescue requests yet</p></div></td></tr>';
+    }
+  }
+
+  loadDashboard();
+  setInterval(loadDashboard, 30000);
+</script>
+</body>
+</html>

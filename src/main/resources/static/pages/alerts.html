@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DMAS — Alerts</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-brand"><span>🚨</span> DISASTER MANAGEMENT & ALERT SYSTEM</div>
+  <div class="topbar-right" id="topbar-user"></div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
+      <div class="page-title">🔔 Alert Management</div>
+      <button class="btn btn-primary" id="add-btn" style="display:none" onclick="openModal('alert-modal')">
+        ➕ Broadcast Alert
+      </button>
+    </div>
+    <div class="page-subtitle">Manage and broadcast emergency alerts to citizens in affected zones.</div>
+
+    <div class="filter-bar">
+      <input id="search" placeholder="🔍 Search alerts..." oninput="renderTable()"/>
+      <select id="f-type" onchange="renderTable()">
+        <option value="">All Types</option>
+        <option value="EVACUATION">Evacuation</option>
+        <option value="SHELTER_IN_PLACE">Shelter in Place</option>
+        <option value="RESOURCE_DISTRIBUTION">Resource Distribution</option>
+        <option value="GENERAL_WARNING">General Warning</option>
+      </select>
+      <select id="f-severity" onchange="renderTable()">
+        <option value="">All Severities</option>
+        <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+      </select>
+      <select id="f-active" onchange="renderTable()">
+        <option value="">All</option>
+        <option value="true">Active Only</option>
+        <option value="false">Inactive</option>
+      </select>
+    </div>
+
+    <div id="alerts-container">
+      <div class="loader-wrap"><div class="loader"></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Create Alert Modal -->
+<div class="modal-overlay" id="alert-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🔔 Broadcast New Alert</h3>
+      <button class="modal-close" onclick="closeModal('alert-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Alert Title *</label>
+        <input id="a-title" class="form-control" placeholder="Brief alert title"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Alert Type *</label>
+          <select id="a-type" class="form-control">
+            <option value="EVACUATION">Evacuation</option>
+            <option value="SHELTER_IN_PLACE">Shelter in Place</option>
+            <option value="RESOURCE_DISTRIBUTION">Resource Distribution</option>
+            <option value="GENERAL_WARNING">General Warning</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Severity *</label>
+          <select id="a-severity" class="form-control">
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH" selected>High</option>
+            <option value="CRITICAL">Critical</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Affected Zone</label>
+        <input id="a-zone" class="form-control" placeholder="e.g. North Chennai, Coastal Districts"/>
+      </div>
+      <div class="form-group">
+        <label>Linked Disaster (Optional)</label>
+        <select id="a-disaster" class="form-control">
+          <option value="">— None —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Alert Message *</label>
+        <textarea id="a-message" class="form-control" rows="4" placeholder="Detailed alert message for citizens..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('alert-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createAlert()">📢 Broadcast Alert</button>
+    </div>
+  </div>
+</div>
+
+<!-- Alert Detail Modal -->
+<div class="modal-overlay" id="detail-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🔔 Alert Detail</h3>
+      <button class="modal-close" onclick="closeModal('detail-modal')">✕</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('detail-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/app.js"></script>
+<script>
+  requireAuth();
+  renderTopbar();
+  renderSidebar('alerts');
+
+  let alerts = [];
+  const isAdmin = getRole() === 'ADMIN';
+
+  if (isAdmin) {
+    document.getElementById('add-btn').style.display = 'flex';
+    loadDisastersForSelect();
+  }
+
+  async function loadDisastersForSelect() {
+    const res = await apiFetch('/disasters');
+    if (res && res.ok) {
+      const sel = document.getElementById('a-disaster');
+      res.data.filter(d => d.status === 'ACTIVE').forEach(d => {
+        sel.innerHTML += `<option value="${d.id}">${d.title}</option>`;
+      });
+    }
+  }
+
+  async function load() {
+    const res = await apiFetch('/alerts');
+    if (res && res.ok) { alerts = res.data; renderTable(); }
+  }
+
+  function renderTable() {
+    const q  = document.getElementById('search').value.toLowerCase();
+    const ft = document.getElementById('f-type').value;
+    const fv = document.getElementById('f-severity').value;
+    const fa = document.getElementById('f-active').value;
+    const filtered = alerts.filter(a =>
+      (!q  || a.title.toLowerCase().includes(q) || a.message.toLowerCase().includes(q) || a.affectedZone.toLowerCase().includes(q)) &&
+      (!ft || a.alertType === ft) &&
+      (!fv || a.severity === fv) &&
+      (fa === '' || String(a.active) === fa)
+    );
+
+    const container = document.getElementById('alerts-container');
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔕</div><p>No alerts found</p></div>';
+      return;
+    }
+
+    const typeIcon = { EVACUATION:'🏃', SHELTER_IN_PLACE:'🏠', RESOURCE_DISTRIBUTION:'📦', GENERAL_WARNING:'⚠️' };
+    const typeLabel = { EVACUATION:'Evacuation', SHELTER_IN_PLACE:'Shelter in Place', RESOURCE_DISTRIBUTION:'Resource Distribution', GENERAL_WARNING:'General Warning' };
+
+    container.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px">` +
+      filtered.map(a => `
+      <div class="card" style="border-left:4px solid ${a.severity==='CRITICAL'?'#c0392b':a.severity==='HIGH'?'#e67e22':a.severity==='MEDIUM'?'#f39c12':'#27ae60'}">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div style="font-size:1.1rem;font-weight:700;flex:1">${typeIcon[a.alertType]||'⚠️'} ${a.title}</div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+              ${severityBadge(a.severity)}
+              ${a.active ? '<span class="badge badge-green">LIVE</span>' : '<span class="badge badge-gray">INACTIVE</span>'}
+            </div>
+          </div>
+          <div style="font-size:0.82rem;color:#888;margin-bottom:8px">
+            <span class="badge badge-blue">${typeLabel[a.alertType]||a.alertType}</span>
+            ${a.affectedZone ? `<span style="margin-left:8px">📍 ${a.affectedZone}</span>` : ''}
+          </div>
+          <p style="font-size:0.88rem;color:#555;line-height:1.5;margin-bottom:10px">${a.message.length>140?a.message.substring(0,140)+'...':a.message}</p>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-size:0.8rem;color:#aaa">${formatDate(a.createdAt)} · ${a.createdByName||'System'}</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-secondary" onclick="showDetail(${a.id})">👁 View</button>
+              ${isAdmin && a.active ? `<button class="btn btn-sm btn-warning" onclick="deactivate(${a.id})">⏹ Deactivate</button>` : ''}
+              ${isAdmin ? `<button class="btn btn-sm btn-secondary" onclick="deleteAlert(${a.id})" style="padding:5px 8px">🗑</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>`).join('') + '</div>';
+  }
+
+  function showDetail(id) {
+    const a = alerts.find(x => x.id === id);
+    if (!a) return;
+    const typeLabel = { EVACUATION:'Evacuation Order', SHELTER_IN_PLACE:'Shelter in Place', RESOURCE_DISTRIBUTION:'Resource Distribution', GENERAL_WARNING:'General Warning' };
+    document.getElementById('detail-body').innerHTML = `
+      <div style="margin-bottom:12px">${severityBadge(a.severity)} &nbsp; <span class="badge badge-blue">${typeLabel[a.alertType]||a.alertType}</span> &nbsp; ${a.active?'<span class="badge badge-green">LIVE</span>':'<span class="badge badge-gray">INACTIVE</span>'}</div>
+      <h2 style="font-size:1.1rem;margin-bottom:8px;color:#2c3e50">${a.title}</h2>
+      <p style="font-size:0.92rem;line-height:1.7;color:#444;margin-bottom:14px">${a.message}</p>
+      <div style="background:#f8f9fa;border-radius:8px;padding:12px;font-size:0.85rem">
+        <div style="margin-bottom:6px">📍 <strong>Affected Zone:</strong> ${a.affectedZone||'All zones'}</div>
+        <div style="margin-bottom:6px">🌊 <strong>Linked Disaster:</strong> ${a.disasterTitle||'—'}</div>
+        <div style="margin-bottom:6px">👤 <strong>Issued By:</strong> ${a.createdByName||'—'}</div>
+        <div>🕒 <strong>Issued At:</strong> ${formatDate(a.createdAt)}</div>
+      </div>`;
+    openModal('detail-modal');
+  }
+
+  async function createAlert() {
+    const body = {
+      title:       document.getElementById('a-title').value,
+      message:     document.getElementById('a-message').value,
+      alertType:   document.getElementById('a-type').value,
+      severity:    document.getElementById('a-severity').value,
+      affectedZone:document.getElementById('a-zone').value,
+      disasterId:  document.getElementById('a-disaster').value || null,
+    };
+    if (!body.title || !body.message) { showToast('Title and message required', 'error'); return; }
+    const res = await apiFetch('/alerts', { method:'POST', body: JSON.stringify(body) });
+    if (res && res.ok) { showToast('Alert broadcast!'); closeModal('alert-modal'); load(); }
+    else showToast(res?.data?.error || 'Failed', 'error');
+  }
+
+  async function deactivate(id) {
+    const res = await apiFetch(`/alerts/${id}/deactivate`, { method:'PUT' });
+    if (res && res.ok) { showToast('Alert deactivated'); load(); }
+    else showToast('Failed', 'error');
+  }
+
+  async function deleteAlert(id) {
+    if (!confirm('Delete this alert?')) return;
+    const res = await apiFetch(`/alerts/${id}`, { method:'DELETE' });
+    if (res && res.ok) { showToast('Deleted'); load(); }
+    else showToast('Delete failed', 'error');
+  }
+
+  load();
+</script>
+</body>
+</html>

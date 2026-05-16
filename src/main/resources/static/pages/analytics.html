@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DMAS — Analytics</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <style>
+    .big-stat { text-align:center; padding:24px 16px; }
+    .big-stat .val { font-size:2.8rem; font-weight:800; color:#c0392b; }
+    .big-stat .lbl { font-size:0.88rem; color:#888; margin-top:4px; }
+    .progress-bar-wrap { margin-bottom:14px; }
+    .progress-label { display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:4px; }
+    .progress-track { height:10px; background:#f0f0f0; border-radius:5px; overflow:hidden; }
+    .progress-fill  { height:100%; border-radius:5px; transition:width 0.6s ease; }
+  </style>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-brand"><span>🚨</span> DISASTER MANAGEMENT & ALERT SYSTEM</div>
+  <div class="topbar-right" id="topbar-user"></div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-title">📊 Analytics Dashboard</div>
+    <div class="page-subtitle">System-wide statistics and operational performance metrics.</div>
+
+    <!-- Big numbers -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px">
+      <div class="card"><div class="big-stat"><div class="val" id="b-disasters">—</div><div class="lbl">Total Disasters</div></div></div>
+      <div class="card"><div class="big-stat"><div class="val" style="color:#e67e22" id="b-alerts">—</div><div class="lbl">Total Alerts</div></div></div>
+      <div class="card"><div class="big-stat"><div class="val" style="color:#2980b9" id="b-rescues">—</div><div class="lbl">Rescue Requests</div></div></div>
+      <div class="card"><div class="big-stat"><div class="val" style="color:#27ae60" id="b-completed">—</div><div class="lbl">Completed Rescues</div></div></div>
+      <div class="card"><div class="big-stat"><div class="val" style="color:#8e44ad" id="b-users">—</div><div class="lbl">Registered Users</div></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+      <!-- Disaster Status Breakdown -->
+      <div class="card">
+        <div class="card-header"><h3>🌊 Disaster Status</h3></div>
+        <div class="card-body" id="disaster-breakdown">
+          <div class="loader-wrap"><div class="loader"></div></div>
+        </div>
+      </div>
+
+      <!-- Rescue Status Breakdown -->
+      <div class="card">
+        <div class="card-header"><h3>🚑 Rescue Request Status</h3></div>
+        <div class="card-body" id="rescue-breakdown">
+          <div class="loader-wrap"><div class="loader"></div></div>
+        </div>
+      </div>
+
+      <!-- Alert Overview -->
+      <div class="card">
+        <div class="card-header"><h3>🔔 Alert Overview</h3></div>
+        <div class="card-body" id="alert-breakdown">
+          <div class="loader-wrap"><div class="loader"></div></div>
+        </div>
+      </div>
+
+      <!-- Team Overview -->
+      <div class="card">
+        <div class="card-header"><h3>👥 Team Composition</h3></div>
+        <div class="card-body" id="team-breakdown">
+          <div class="loader-wrap"><div class="loader"></div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-header"><h3>📋 Recent Disaster Events</h3></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Title</th><th>Category</th><th>Severity</th><th>Status</th><th>Location</th><th>Reported</th></tr></thead>
+          <tbody id="recent-disasters"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast"></div>
+<script src="/js/app.js"></script>
+<script>
+  requireAdmin();
+  renderTopbar();
+  renderSidebar('analytics');
+
+  function progressBar(label, value, max, color) {
+    const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+    return `<div class="progress-bar-wrap">
+      <div class="progress-label"><span>${label}</span><span style="font-weight:700">${value} <span style="color:#aaa;font-weight:400">(${pct}%)</span></span></div>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
+    </div>`;
+  }
+
+  async function loadAnalytics() {
+    const res = await apiFetch('/analytics/summary');
+    if (!res || !res.ok) { showToast('Failed to load analytics', 'error'); return; }
+    const d = res.data;
+
+    // Big numbers
+    document.getElementById('b-disasters').textContent = d.totalDisasters;
+    document.getElementById('b-alerts').textContent    = d.totalAlerts;
+    document.getElementById('b-rescues').textContent   = d.totalRescueRequests;
+    document.getElementById('b-completed').textContent = d.completedRequests;
+    document.getElementById('b-users').textContent     = d.totalUsers;
+
+    // Disaster status
+    const dr = await apiFetch('/disasters');
+    if (dr && dr.ok) {
+      const active  = dr.data.filter(x=>x.status==='ACTIVE').length;
+      const monitor = dr.data.filter(x=>x.status==='MONITORING').length;
+      const resolved= dr.data.filter(x=>x.status==='RESOLVED').length;
+      const total   = dr.data.length;
+      document.getElementById('disaster-breakdown').innerHTML =
+        progressBar('🔴 Active',     active,   total, '#c0392b') +
+        progressBar('🟡 Monitoring', monitor,  total, '#f39c12') +
+        progressBar('🟢 Resolved',   resolved, total, '#27ae60');
+    }
+
+    // Rescue status
+    const rr = await apiFetch('/rescue');
+    if (rr && rr.ok) {
+      const pending   = rr.data.filter(x=>x.status==='PENDING').length;
+      const assigned  = rr.data.filter(x=>x.status==='ASSIGNED').length;
+      const ongoing   = rr.data.filter(x=>x.status==='ONGOING').length;
+      const completed = rr.data.filter(x=>x.status==='COMPLETED').length;
+      const total     = rr.data.length;
+      document.getElementById('rescue-breakdown').innerHTML =
+        progressBar('⏳ Pending',   pending,   total, '#f39c12') +
+        progressBar('📋 Assigned',  assigned,  total, '#2980b9') +
+        progressBar('🚑 Ongoing',   ongoing,   total, '#e67e22') +
+        progressBar('✅ Completed', completed, total, '#27ae60');
+    }
+
+    // Alert overview
+    const ar = await apiFetch('/alerts');
+    if (ar && ar.ok) {
+      const active   = ar.data.filter(x=>x.active).length;
+      const inactive = ar.data.filter(x=>!x.active).length;
+      const critical = ar.data.filter(x=>x.severity==='CRITICAL').length;
+      const high     = ar.data.filter(x=>x.severity==='HIGH').length;
+      const total    = ar.data.length;
+      document.getElementById('alert-breakdown').innerHTML =
+        `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div style="text-align:center;padding:12px;background:#fde8e6;border-radius:8px">
+            <div style="font-size:1.6rem;font-weight:800;color:#c0392b">${active}</div>
+            <div style="font-size:0.8rem;color:#888">Active Alerts</div>
+          </div>
+          <div style="text-align:center;padding:12px;background:#e8f8ef;border-radius:8px">
+            <div style="font-size:1.6rem;font-weight:800;color:#27ae60">${inactive}</div>
+            <div style="font-size:0.8rem;color:#888">Deactivated</div>
+          </div>
+        </div>` +
+        progressBar('🔴 Critical', critical, total, '#c0392b') +
+        progressBar('🟠 High',     high,     total, '#e67e22');
+    }
+
+    // Team
+    document.getElementById('team-breakdown').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+        <div style="padding:16px;background:#fde8e6;border-radius:10px">
+          <div style="font-size:1.8rem;font-weight:800;color:#c0392b">${d.totalUsers - d.totalResponders - d.totalCitizens || 1}</div>
+          <div style="font-size:0.82rem;color:#888;margin-top:4px">⚙️ Admins</div>
+        </div>
+        <div style="padding:16px;background:#e3f0fc;border-radius:10px">
+          <div style="font-size:1.8rem;font-weight:800;color:#2980b9">${d.totalResponders}</div>
+          <div style="font-size:0.82rem;color:#888;margin-top:4px">🚑 Responders</div>
+        </div>
+        <div style="padding:16px;background:#e8f8ef;border-radius:10px">
+          <div style="font-size:1.8rem;font-weight:800;color:#27ae60">${d.totalCitizens}</div>
+          <div style="font-size:0.82rem;color:#888;margin-top:4px">👤 Citizens</div>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        ${progressBar('👥 Total Registered Users', d.totalUsers, d.totalUsers, '#8e44ad')}
+      </div>`;
+
+    // Recent disasters table
+    if (dr && dr.ok) {
+      document.getElementById('recent-disasters').innerHTML = dr.data.slice(0,8).map(d =>
+        `<tr>
+          <td style="font-weight:600">${categoryIcon(d.category)} ${d.title}</td>
+          <td><span class="badge badge-blue">${d.category}</span></td>
+          <td>${severityBadge(d.severity)}</td>
+          <td>${statusBadge(d.status)}</td>
+          <td style="font-size:0.85rem">${d.location||'—'}</td>
+          <td style="font-size:0.82rem;color:#888">${formatDate(d.createdAt)}</td>
+        </tr>`).join('');
+    }
+  }
+
+  loadAnalytics();
+</script>
+</body>
+</html>
